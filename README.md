@@ -37,21 +37,6 @@ Jeśli nie masz zainstalowanego Pythona:
 
 1. Pobierz aplikację z [repozytorium GitHub](https://github.com/twój-username/dictaitor)
 2. Rozpakuj pobrany plik ZIP do wybranego folderu
-3. Strukura folderów:
-dictaitor/
-├── assets/                # Logo i zasoby
-├── config/                # Katalog na konfigurację
-├── modules/               # Moduły aplikacji
-│   ├── audio_recorder.py
-│   ├── config_manager.py
-│   ├── local_stt.py
-│   ├── openai_whisper_client.py
-├── recordings/            # Katalog na nagrania
-├── main_app.py            # Główny plik aplikacji
-├── requirements.txt       # Lista zależności
-├── run_dictaitor.bat      # Skrypt uruchamiający
-├── setup.bat              # Skrypt instalacyjny
-└── README.md              # Instrukcja dla użytkownika
 
 ### Krok 3: Instalacja zależności
 
