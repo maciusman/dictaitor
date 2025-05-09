@@ -1,0 +1,8 @@
+# Wymagane biblioteki dla aplikacji DictAItor
+pyaudio
+openai-whisper
+pillow
+requests
+ffmpeg-python
+numpy
+librosa
