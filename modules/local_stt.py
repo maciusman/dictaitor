@@ -111,18 +111,21 @@ def normalize_path(path: str) -> str:
     logger.info(f"Plik zweryfikowany - istnieje: {normalized_path}")
     return normalized_path
 
-def transcribe_audio_local(audio_file_path: str, model_name: str = "turbo", language: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+def transcribe_audio_local(audio_file_path: str, model_name: str = "turbo", language: Optional[str] = None, task: str = "transcribe") -> Tuple[Optional[str], Optional[str]]:
     """
-    Przeprowadza transkrypcję pliku audio przy użyciu lokalnego modelu Whisper.
+    Przeprowadza transkrypcję lub tłumaczenie pliku audio przy użyciu lokalnego modelu Whisper.
 
     Args:
         audio_file_path (str): Ścieżka do pliku audio.
         model_name (str): Nazwa modelu Whisper do użycia (np. "tiny", "base", "turbo").
         language (Optional[str]): Kod języka (np. "en", "pl") do transkrypcji. 
                                  Jeśli None, Whisper spróbuje wykryć automatycznie.
+                                 Dla zadania 'translate', ten parametr jest ignorowany przez Whisper,
+                                 ale może być logowany.
+        task (str): Rodzaj zadania: "transcribe" (domyślnie) lub "translate".
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (transkrypcja, błąd_wiadomość)
+        Tuple[Optional[str], Optional[str]]: (wynik_tekstowy, błąd_wiadomość)
     """
     if not WHISPER_INSTALLED:
         return None, "Biblioteka Whisper nie jest zainstalowana. Zainstaluj używając: pip install openai-whisper"
@@ -139,11 +142,12 @@ def transcribe_audio_local(audio_file_path: str, model_name: str = "turbo", lang
         if model is None:
             return None, f"Nie udało się załadować modelu Whisper '{model_name}'."
 
-        logger.info(f"Rozpoczynanie lokalnej transkrypcji pliku: {normalized_path} (model: {model_name}, język: {language or 'auto'})")
+        log_action = "tłumaczenia" if task == "translate" else "transkrypcji"
+        logger.info(f"Rozpoczynanie lokalnej {log_action} pliku: {normalized_path} (model: {model_name}, język: {language or 'auto'}, zadanie: {task})")
         
-        # Opcje transkrypcji
-        transcribe_options = {"fp16": False} # Ustaw na True, jeśli masz GPU NVIDII i CUDA
-        if language:
+        # Opcje transkrypcji/tłumaczenia
+        transcribe_options = {"fp16": False, "task": task} # Dodano task
+        if language and task == "transcribe": # Język jest relevantny tylko dla transkrypcji
             transcribe_options["language"] = language
         
         # Sprawdź jeszcze raz przed przekazaniem do Whisper
@@ -169,7 +173,8 @@ def transcribe_audio_local(audio_file_path: str, model_name: str = "turbo", lang
         transcription = result["text"]
         
         detected_lang = result.get("language", "nie wykryto")
-        logger.info(f"Lokalna transkrypcja zakończona. Wykryty język: {detected_lang}.")
+        log_action_done = "Lokalne tłumaczenie" if task == "translate" else "Lokalna transkrypcja"
+        logger.info(f"{log_action_done} zakończona. Wykryty język: {detected_lang}.")
         return transcription.strip(), None
         
     except FileNotFoundError as e:
@@ -177,6 +182,6 @@ def transcribe_audio_local(audio_file_path: str, model_name: str = "turbo", lang
         logger.error(error_msg)
         return None, error_msg
     except Exception as e:
-        error_msg = f"Błąd podczas lokalnej transkrypcji pliku {audio_file_path}: {e}"
+        error_msg = f"Błąd podczas lokalnej {log_action} pliku {audio_file_path}: {e}"
         logger.error(error_msg)
         return None, error_msg

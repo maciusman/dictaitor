@@ -144,3 +144,106 @@ class OpenAIWhisperClient:
             error_message = f"Nieoczekiwany błąd podczas transkrypcji: {str(e)}"
             logger.error(error_message)
             return None, error_message
+            
+    def translate_audio_to_english(self, audio_file_path: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Tłumaczy plik audio na język angielski przy użyciu API OpenAI Whisper.
+        
+        Args:
+            audio_file_path: Ścieżka do pliku audio
+            
+        Returns:
+            Tuple[Optional[str], Optional[str]]: (przetłumaczony_tekst, komunikat_błędu)
+        """
+        if not self.api_key:
+            logger.error("Brak klucza API OpenAI")
+            return None, "Brak klucza API OpenAI. Ustaw klucz API w konfiguracji."
+        
+        if not os.path.exists(audio_file_path):
+            logger.error(f"Plik audio nie istnieje: {audio_file_path}")
+            return None, f"Plik audio nie istnieje: {os.path.basename(audio_file_path)}"
+            
+        if self.debug_mode:
+            file_size_mb = os.path.getsize(audio_file_path) / (1024 * 1024)
+            logger.info(f"Informacje o pliku audio (tłumaczenie):")
+            logger.info(f"- Ścieżka: {audio_file_path}")
+            logger.info(f"- Rozmiar: {file_size_mb:.2f} MB")
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            
+            # Przygotowanie danych formularza
+            data = {
+                "model": "whisper-1",  # OpenAI ma tylko jeden model Whisper dostępny przez API
+                "response_format": "text" 
+            }
+            
+            # Otwórz plik audio do przesłania
+            files = {
+                "file": (os.path.basename(audio_file_path), open(audio_file_path, "rb"))
+            }
+            
+            translation_api_url = "https://api.openai.com/v1/audio/translations"
+
+            if self.debug_mode:
+                logger.info(f"Wysyłanie żądania tłumaczenia do API Whisper...")
+                logger.info(f"URL API: {translation_api_url}")
+                logger.info(f"Parametry: {data}")
+            
+            # Wyślij żądanie
+            response = requests.post(
+                translation_api_url,
+                headers=headers,
+                data=data,
+                files=files,
+                timeout=60 
+            )
+            
+            # Zamknij plik
+            files["file"][1].close()
+            
+            if self.debug_mode:
+                logger.info(f"Status odpowiedzi: {response.status_code}")
+                try:
+                    logger.info(f"Nagłówki odpowiedzi: {dict(response.headers)}")
+                except:
+                    pass
+            
+            # Sprawdź, czy żądanie się powiodło
+            response.raise_for_status()
+            
+            content_type = response.headers.get("Content-Type", "")
+            
+            if "application/json" in content_type:
+                result = response.json()
+                if "text" in result:
+                    return result["text"], None
+                else:
+                    logger.warning(f"Nieoczekiwany format odpowiedzi JSON: {json.dumps(result)}")
+                    return json.dumps(result), None
+            else:
+                # Zwróć bezpośrednio tekst
+                return response.text, None
+                
+        except requests.exceptions.RequestException as e:
+            error_message = f"Błąd komunikacji z API OpenAI Whisper (tłumaczenie): {str(e)}"
+            logger.error(error_message)
+            
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    if 'error' in error_data:
+                        error_detail = error_data['error'].get('message', str(e))
+                        error_message = f"Błąd API OpenAI (tłumaczenie): {error_detail}"
+                except:
+                    if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                        error_message = f"Błąd API ({e.response.status_code}) (tłumaczenie): {e.response.text}"
+            
+            return None, error_message
+            
+        except Exception as e:
+            error_message = f"Nieoczekiwany błąd podczas tłumaczenia: {str(e)}"
+            logger.error(error_message)
+            return None, error_message

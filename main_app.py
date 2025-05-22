@@ -82,6 +82,7 @@ OPENAI_KEY_CONFIG = 'openai_api_key'
 PREFERRED_MODE_CONFIG = 'preferred_mode'
 PREFERRED_MODEL_CONFIG = 'preferred_model'
 PREFERRED_LANGUAGE_CONFIG = 'preferred_language'
+PREFERRED_OUTPUT_MODE_CONFIG = 'preferred_output_mode' # Nowy klucz konfiguracji
 
 # Upewnij się, że niezbędne katalogi istnieją
 for directory in [ASSETS_DIR, CONFIG_DIR, RECORDINGS_DIR]:
@@ -129,6 +130,12 @@ class DictAItorApp:
         
         # Ustaw domyślny język z konfiguracji lub pusty
         self.selected_language_code.set(self.config.get(PREFERRED_LANGUAGE_CONFIG, ''))
+        
+        # Nowa zmienna dla trybu wyjścia
+        self.selected_output_mode = tk.StringVar()
+        # Wczytaj preferowany tryb wyjścia z konfiguracji lub ustaw domyślny
+        preferred_output_mode = self.config.get(PREFERRED_OUTPUT_MODE_CONFIG, "Polski (Transkrypcja)")
+        self.selected_output_mode.set(preferred_output_mode)
         
         # Ustaw domyślny model Whisper - preferuj "turbo" jeśli jest dostępny
         preferred_model = self.config.get(PREFERRED_MODEL_CONFIG, '')
@@ -503,6 +510,27 @@ class DictAItorApp:
         
         self.language_combobox.bind("<<ComboboxSelected>>", self._on_language_selected)
 
+        # Nowa sekcja dla wyboru języka wyjściowego
+        self.output_language_frame = ttk.Frame(model_frame)
+        self.output_language_frame.pack(fill=tk.X, pady=(5,0)) # pady=(5,0) to dodać trochę przestrzeni nad
+
+        ttk.Label(self.output_language_frame, text="Język wyjściowy:").pack(side=tk.LEFT, padx=(0, 5))
+        self.output_language_combobox = ttk.Combobox(
+            self.output_language_frame,
+            textvariable=self.selected_output_mode,
+            values=["Polski (Transkrypcja)", "Angielski (Tłumaczenie)"],
+            state="readonly",
+            width=20  # Spójna szerokość z innymi comboboxami
+        )
+        self.output_language_combobox.pack(side=tk.LEFT)
+        self.output_language_combobox.bind("<<ComboboxSelected>>", self._on_output_mode_selected)
+
+    def _on_output_mode_selected(self, event: Optional[tk.Event]) -> None:
+        """Obsługuje wybór trybu wyjściowego i zapisuje go w konfiguracji."""
+        selected_mode = self.selected_output_mode.get()
+        self._save_settings({PREFERRED_OUTPUT_MODE_CONFIG: selected_mode})
+        logger.info(f"Zapisano preferowany tryb wyjściowy: {selected_mode}")
+
     def _create_action_section(self, parent: ttk.Frame) -> None:
         """
         Tworzy sekcję przycisków akcji.
@@ -874,8 +902,18 @@ class DictAItorApp:
             model_name: Nazwa modelu Whisper
             language_code: Kod języka (może być pusty)
         """
-        logger.info(f"Rozpoczynanie lokalnej transkrypcji pliku: {audio_path} z modelem Whisper: {model_name}, język: {language_code or 'auto'}")
+        selected_output_mode = self.selected_output_mode.get()
+        task = 'translate' if selected_output_mode == "Angielski (Tłumaczenie)" else 'transcribe'
         
+        log_message = (
+            f"Rozpoczynanie lokalnego {'tłumaczenia' if task == 'translate' else 'transkrypcji'} pliku: {audio_path} "
+            f"z modelem Whisper: {model_name}, język: {language_code or 'auto'}, zadanie: {task}"
+        )
+        logger.info(log_message)
+        
+        transcript = None
+        error_msg = None
+
         try:
             # Sprawdź czy plik istnieje
             if not os.path.exists(audio_path):
@@ -891,7 +929,8 @@ class DictAItorApp:
                 transcript, error_msg = transcribe_audio_local(
                     audio_path, 
                     model_name=model_name, 
-                    language=language_code if language_code else None
+                    language=language_code if language_code else None,
+                    task=task # Nowy parametr
                 )
             else:
                 # Bezpośrednie użycie Whisper, jeśli moduł local_stt jest niedostępny
@@ -899,20 +938,23 @@ class DictAItorApp:
                     import whisper
                     model = whisper.load_model(model_name)
                     
-                    options = {"fp16": False}
-                    if language_code:
-                        options["language"] = language_code
-                        
-                    result = model.transcribe(audio_path, **options)
+                    # Opcje przekazywane bezpośrednio do transcribe
+                    result = model.transcribe(
+                        audio_path, 
+                        language=language_code if language_code else None, 
+                        task=task, 
+                        fp16=False
+                    )
                     transcript = result["text"].strip()
                     error_msg = None
                     
                     detected_lang = result.get("language", "nie wykryto")
-                    logger.info(f"Lokalna transkrypcja zakończona. Wykryty język: {detected_lang}.")
+                    log_task_result = "Lokalne tłumaczenie" if task == 'translate' else "Lokalna transkrypcja"
+                    logger.info(f"{log_task_result} zakończona. Wykryty język: {detected_lang}.")
                     
                 except Exception as e:
                     transcript = None
-                    error_msg = f"Błąd podczas bezpośredniej transkrypcji Whisper: {str(e)}"
+                    error_msg = f"Błąd podczas bezpośredniej {task} Whisper: {str(e)}"
                     logger.error(error_msg)
             
             def update_transcription_ui():
@@ -951,8 +993,10 @@ class DictAItorApp:
             audio_path: Ścieżka do pliku audio
             language_code: Kod języka (może być pusty)
         """
-        logger.info(f"Rozpoczynanie transkrypcji OpenAI pliku: {audio_path}, język: {language_code or 'auto'}")
-        
+        selected_mode = self.selected_output_mode.get()
+        transcript = None
+        error_msg = None
+
         try:
             # Sprawdź czy plik istnieje
             if not os.path.exists(audio_path):
@@ -961,12 +1005,20 @@ class DictAItorApp:
             # Sprawdź rozmiar pliku do debugowania
             file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
             logger.info(f"Rozmiar pliku: {file_size_mb:.2f} MB")
-            
-            # Wykonaj transkrypcję
-            transcript, error_msg = self.openai_client.transcribe_audio(
-                audio_path, 
-                language=language_code if language_code else None
-            )
+
+            if selected_mode == "Angielski (Tłumaczenie)":
+                logger.info(f"Rozpoczynanie tłumaczenia OpenAI pliku: {audio_path} na angielski")
+                if hasattr(self.openai_client, 'translate_audio_to_english'):
+                    transcript, error_msg = self.openai_client.translate_audio_to_english(audio_path)
+                else:
+                    error_msg = "Funkcja tłumaczenia nie jest dostępna w kliencie OpenAI."
+                    logger.error(error_msg)
+            else: # Domyślnie "Polski (Transkrypcja)"
+                logger.info(f"Rozpoczynanie transkrypcji OpenAI pliku: {audio_path}, język: {language_code or 'auto'}")
+                transcript, error_msg = self.openai_client.transcribe_audio(
+                    audio_path, 
+                    language=language_code if language_code else None
+                )
             
             def update_transcription_ui():
                 if error_msg:
